@@ -1,41 +1,62 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-from peft import PeftModel
 import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+from flask import Flask, request, jsonify
 
-app = FastAPI()
-
+# -----------------------------
+# 1. Model Settings
+# -----------------------------
 BASE_MODEL = "codellama/CodeLlama-7b-Instruct-hf"
-ADAPTER_PATH = r"output_archive_name/content/sql_codellama_qlora"  # relative path inside repo
+ADAPTER_ID = "tamilanda/my-sql-model"
 
-# Load everything on startup (Render CPU)
-print("🚀 Loading base model...")
+# Optional: Optimize CPU performance
+torch.set_num_threads(4)
+
+print("🔹 Loading tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+
+print("🔹 Loading base model (CPU)... This may take a few minutes on first start")
 model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL,
     torch_dtype=torch.float32,
-    device_map={"": "cpu"}
+    device_map="cpu"
 )
 
-print("🔌 Applying adapter...")
-model = PeftModel.from_pretrained(model, ADAPTER_PATH)
+print("🔹 Attaching LoRA adapter...")
+model = PeftModel.from_pretrained(model, ADAPTER_ID)
+model.to("cpu")
+model.eval()
 
-# Create pipeline without device argument
-pipe = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer
-)
+# -----------------------------
+# 2. Flask App
+# -----------------------------
+app = Flask(__name__)
 
-class Query(BaseModel):
-    text: str
+@app.route("/")
+def home():
+    return jsonify({"message": "✅ CodeLlama SQL API is running!"})
 
-@app.get("/")
-def root():
-    return {"status": "running", "message": "CodeLlama + Adapter on Render 🚀"}
+@app.route("/generate", methods=["POST"])
+def generate():
+    data = request.get_json()
+    user_query = data.get("query", "")
 
-@app.post("/generate")
-def generate_sql(q: Query):
-    result = pipe(q.text, max_new_tokens=128, do_sample=False)
-    return {"input": q.text, "output": result[0]["generated_text"]}
+    if not user_query.strip():
+        return jsonify({"error": "Query is empty"}), 400
+
+    prompt = f"<s>[INST] {user_query} [/INST]"
+    inputs = tokenizer(prompt, return_tensors="pt")
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=200,
+            do_sample=False,
+            temperature=0.7
+        )
+
+    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return jsonify({"query": user_query, "response": response})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
