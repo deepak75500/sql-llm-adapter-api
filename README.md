@@ -1,0 +1,2 @@
+This is a domain-specific model created specifically for MySQL. It is significantly more efficient than other models such as Defog SQLCoder, SQLCoder2, and Natural-SQL-7B. The model has been extensively fine-tuned for MySQL use cases and demonstrates excellent performance in schema understanding, query generation, and optimization. The model is highly effective for domain-specific SQL tasks. The Hugging Face link is:
+https://huggingface.co/tamilanda/my-sql-model
